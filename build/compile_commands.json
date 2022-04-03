@@ -1,0 +1,12 @@
+[
+{
+  "directory": "/home/matzix/shared/biai/build",
+  "command": "/bin/c++  -I/home/matzix/shared/biai/include -g -o CMakeFiles/biai.dir/src/network.cpp.o -c /home/matzix/shared/biai/src/network.cpp",
+  "file": "/home/matzix/shared/biai/src/network.cpp"
+},
+{
+  "directory": "/home/matzix/shared/biai/build",
+  "command": "/bin/c++  -I/home/matzix/shared/biai/include -g -o CMakeFiles/example.dir/example/main.cpp.o -c /home/matzix/shared/biai/example/main.cpp",
+  "file": "/home/matzix/shared/biai/example/main.cpp"
+}
+]

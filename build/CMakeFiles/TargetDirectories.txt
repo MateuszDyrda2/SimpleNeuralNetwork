@@ -1,0 +1,4 @@
+/home/matzix/shared/biai/build/CMakeFiles/biai.dir
+/home/matzix/shared/biai/build/CMakeFiles/example.dir
+/home/matzix/shared/biai/build/CMakeFiles/edit_cache.dir
+/home/matzix/shared/biai/build/CMakeFiles/rebuild_cache.dir
