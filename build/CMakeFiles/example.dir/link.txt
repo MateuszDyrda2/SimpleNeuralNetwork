@@ -1,1 +1,0 @@
-/bin/c++ -g CMakeFiles/example.dir/example/main.cpp.o -o example  libbiai.a 

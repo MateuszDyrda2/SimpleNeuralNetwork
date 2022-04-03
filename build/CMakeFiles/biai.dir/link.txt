@@ -1,2 +1,0 @@
-/bin/ar qc libbiai.a CMakeFiles/biai.dir/src/network.cpp.o
-/bin/ranlib libbiai.a
