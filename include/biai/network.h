@@ -11,6 +11,7 @@
 #include <vector>
 
 namespace biai {
+// TODO: Implement as matrices
 static float sigmoid(float x)
 {
     return 1.0f / (1.0f + std::exp(-x));
@@ -32,11 +33,9 @@ class neural_network
         network_builder& output_layer(std::size_t size);
         network_builder& hidden_layer(std::size_t size);
         network_builder& activation_function(const activation_function_t& af);
-        network_builder& learning_rate(float value);
         std::unique_ptr<neural_network> build();
 
       private:
-        float learningRate;
         std::size_t inputLayer;
         std::size_t outputLayer;
         std::vector<std::size_t> hiddenLayers;
@@ -57,7 +56,7 @@ class neural_network
     self_type operator=(self_type&& other) noexcept;
     ~neural_network();
 
-    void train(const array_t<float>& inputs, const array_t<float>& expected);
+    void train(const array_t<float>& inputs, const array_t<float>& expected, float learningRate);
     void evaluate(const array_t<float>& inputs, const array_t<float>& expected);
 
     array_t<float> predict(const array_t<float>& input);
@@ -73,19 +72,24 @@ class neural_network
     };
     using layer_t = array_t<neuron_t>;
 
-    size_type inputSize;
-    array_t<layer_t> layers;
+    array_t<float> inputLayer;
+    array_t<size_type> layerSize;
+    array_t<array_t<float>> biases;
+    array_t<array_t<float>> outputs;
+    array_t<array_t<float>> deltas;
+    array_t<array_t<array_t<float>>> weights;
+
+    // array_t<layer_t> layers;
     activation_function_t af;
-    float learningRate;
 
   private:
     friend class network_builder;
     neural_network(network_builder& nb);
 
     void initialize_weights();
-    array_t<float> forward_propagate(const array_t<float>& inputs);
+    array_t<float> forward_pass();
     void backpropagate_error(const array_t<float>& expected);
-    void update_weights(const array_t<float>& inputs);
+    void update_weights(float learningRate);
 };
 
 inline neural_network::network_builder& neural_network::network_builder::input_layer(std::size_t size)
@@ -108,47 +112,37 @@ inline neural_network::network_builder& neural_network::network_builder::activat
     this->af = af;
     return *this;
 }
-inline neural_network::network_builder& neural_network::network_builder::learning_rate(float value)
-{
-    learningRate = value;
-    return *this;
-}
 inline std::unique_ptr<neural_network> neural_network::network_builder::build()
 {
     return std::unique_ptr<neural_network>(new neural_network(*this));
 }
 inline neural_network::neural_network(network_builder& nb)
 {
-    // set the learning rate
-    learningRate = nb.learningRate;
     // store the activation function
     af = nb.af;
     // set the number of inputs
-    inputSize = nb.inputLayer;
-    // create requested amount of hidden layers
-    std::for_each(
-        nb.hiddenLayers.begin(), nb.hiddenLayers.end(),
-        [this](size_type size) {
-            layers.push_back(layer_t(size));
-        });
-    // set the output layer
-    layers.push_back(layer_t(nb.outputLayer));
+    inputLayer.resize(nb.inputLayer);
+    // set the number of layers
+    layerSize.assign(nb.hiddenLayers.begin(), nb.hiddenLayers.end());
+    layerSize.push_back(nb.outputLayer);
 
-    // set the number of weights in the first hidden layer
-    std::for_each(
-        layers.front().begin(), layers.front().end(),
-        [this](auto& neuron) {
-            neuron.weights.resize(inputSize);
-        });
-    // set the number of weights in the rest of hidden layers and
-    // in the output layer
-    for(size_type i = 1; i < layers.size(); ++i)
+    for(auto& size : layerSize)
     {
-        std::for_each(
-            layers[i].begin(), layers[i].end(),
-            [&](auto& neuron) {
-                neuron.weights.resize(layers[i - 1].size());
-            });
+        biases.emplace_back(size);
+        outputs.emplace_back(size);
+        deltas.emplace_back(size);
+        weights.emplace_back(size);
+    }
+
+    // set the number of weights in the hidden layers and output layer
+    size_type weightSize = inputLayer.size();
+    for(auto& wi : weights)
+    {
+        for(auto& wj : wi)
+        {
+            wj.resize(weightSize);
+        }
+        weightSize = wi.size();
     }
 
     // random number generator
@@ -158,113 +152,93 @@ inline neural_network::neural_network(network_builder& nb)
     // for each weight in output and hidden layers generate a pseudorandom <0,1> number
     // initialize weights to a pseudo-random number between '0' and '1'
     // initialize bias to '0'
-    std::for_each(
-        layers.begin(), layers.end(),
-        [&](auto& layer) {
-            std::for_each(
-                layer.begin(), layer.end(),
-                [&](auto& neuron) {
-                    neuron.bias = 0;
-                    std::for_each(
-                        neuron.weights.begin(), neuron.weights.end(),
-                        [&](auto& weight) {
-                            weight = distribution(generator);
-                        });
-                });
-        });
-}
-inline void neural_network::train(const array_t<float>& inputs, const array_t<float>& expected)
-{
-    assert(inputs.size() == inputSize);
-    assert(layers.back().size() == expected.size());
-}
-inline neural_network::array_t<float> neural_network::forward_propagate(const array_t<float>& inputs)
-{
-    auto input = inputs;
-    for(auto& layer : layers)
+    for(auto& wi : weights)
     {
-        array_t<float> output;
-        for(auto& neuron : layer)
+        for(auto& wj : wi)
         {
-            auto& weights = neuron.weights;
-            assert(weights.size() == input.size());
-            // calculate weighted sum of inputs
-            float result = 0.f;
-            for(size_type i = 0; i < input.size(); ++i)
+            for(auto& wk : wj)
             {
-                result += weights[i] * input[i];
+                wk = distribution(generator);
             }
-            // add bias
-            result += neuron.bias;
-            // add result of activation function to output
-            auto activation = af(result);
-            neuron.output   = activation;
-            output.push_back(activation);
         }
-        input = std::move(output);
     }
-    return input;
+}
+inline void neural_network::train(const array_t<float>& inputs, const array_t<float>& expected, float learningRate)
+{
+    assert(inputs.size() == inputLayer.size());
+    assert(layerSize.back() == expected.size());
+    inputLayer = inputs;
+}
+inline neural_network::array_t<float> neural_network::forward_pass()
+{
+    auto* in = &inputLayer;
+    for(size_type i = 0; i < layerSize.size(); ++i)
+    {
+        for(size_type j = 0; j < layerSize[i]; ++j)
+        {
+            auto& w      = weights[i][j];
+            float result = biases[i][j];
+            for(size_type k = 0; k < w.size(); ++k)
+            {
+                result += w[k] * (*in)[k];
+            }
+            outputs[i][j] = af(result);
+        }
+        in = &outputs[i];
+    }
+    return *in;
 }
 inline void neural_network::backpropagate_error(const array_t<float>& expected)
 {
     // TODO: calculate with beta
     //
     // backward propagation for the output layer
-    auto& outputLayer = layers.back();
-    assert(outputLayer.size() == expected.size());
-    for(size_type i = 0; i < outputLayer.size(); ++i)
+    auto outSize = layerSize.back();
+    assert(outSize == expected.size());
+    for(size_t i = 0; i < outSize; ++i)
     {
-        auto& neuron = outputLayer[i];
-        neuron.delta = (neuron.output - expected[i]) * neuron.output * (1.f - neuron.output);
+        auto nOutput       = outputs[outSize][i];
+        deltas[outSize][i] = (nOutput - expected[i]) * nOutput * (1.f - nOutput);
     }
     // backward propagation for the hidden layers
-    for(int i = layers.size() - 2; i >= 0; --i)
+    for(size_t i = layerSize.size() - 2; i >= 0; --i)
     {
-        auto& layer = layers[i];
-        for(size_type j = 0; j < layer.size(); ++j)
+        for(size_t j = 0; j < layerSize[i]; ++j)
         {
             float error = 0.f;
-            for(const auto& neuron : layers[i + 1])
+            for(size_t k = 0; k < layerSize[i + 1]; ++k)
             {
-                error += neuron.weights[j] * neuron.delta;
+                error += weights[i + 1][k][j] * deltas[i + 1][k];
             }
-            auto& neuron = layer[j];
-            neuron.delta = neuron.output * (1.f - neuron.output) * error;
+            auto nOutput = outputs[i][j];
+            deltas[i][j] = nOutput * (1.f - nOutput) * error;
         }
     }
 }
-inline void neural_network::update_weights(const array_t<float>& inputs)
+inline void neural_network::update_weights(float learningRate)
 {
-    auto& first = layers.front();
-    assert(first.front().weights.size() == inputs.size());
-
-    auto output = inputs;
+    auto in = &inputLayer;
     // for each layer
-    std::for_each(
-        layers.begin(), layers.end(),
-        [&, this](auto& layer) {
-            array_t<float> layerOut;
-            // for each neuron
-            std::for_each(
-                layer.begin(), layer.end,
-                [&, this](auto& neuron) {
-                    // for each weight
-                    for(size_type i = 0; i < neuron.weights.size(); ++i)
-                    {
-                        // update each weight
-                        neuron.weights[i] -= learningRate * neuron.delta * output[i];
-                    }
-                    // update bias
-                    neuron.bias -= learningRate * neuron.delta;
-                    layerOut.push_back(neuron.output);
-                });
-            output = std::move(layerOut);
-        });
+    for(size_type i = 0; i < weights.size(); ++i)
+    {
+        // for each neuron
+        for(size_type j = 0; j < weights[i].size(); ++j)
+        {
+            // for each weight
+            for(size_type k = 0; k < weights[i][j].size(); ++k)
+            {
+                weights[i][j][k] -= learningRate * deltas[i][j] * (*in)[k];
+            }
+            biases[i][j] -= learningRate * deltas[i][j];
+        }
+        in = &outputs[i];
+    }
 }
 inline neural_network::array_t<float>
 neural_network::predict(const array_t<float>& input)
 {
-    return forward_propagate(input);
+    inputLayer = input;
+    return forward_propagate();
 }
 inline neural_network::array_t<neural_network::array_t<float>>
 neural_network::predict(const array_t<array_t<float>>& input)
@@ -272,7 +246,8 @@ neural_network::predict(const array_t<array_t<float>>& input)
     array_t<array_t<float>> output;
     for(auto& in : input)
     {
-        output.push_back(forward_propagate(in));
+        inputLayer = in;
+        output.push_back(forward_pass());
     }
     return output;
 }
