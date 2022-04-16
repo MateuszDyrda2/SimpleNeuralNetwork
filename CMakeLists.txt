@@ -1,14 +1,21 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(biai)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_VERSION 17)
+set(CMAKE_CXX_VERSION_REQUIRED ON)
 
-set(biai_SRC
-	src/network.cpp
-)
+set(biai_VERSION_MAJOR 0)
+set(biai_VERSION_MINOR 1)
+set(biai_VERSION_PATCH 0)
+set(biai_VERSION ${biai_VERSION_MAJOR}.${biai_VERSION_MINOR}.${biai_VERSION_PATCH})
+
+project(biai VERSION ${biai_VERSION})
+
 set(biai_BUILD_EXAMPLE ON)
 
-add_library(biai ${biai_SRC})
-target_include_directories(biai PUBLIC include/)
+# the library is header only
+add_library(biai INTERFACE)
+target_include_directories(biai INTERFACE include/)
 
 if(${biai_BUILD_EXAMPLE})
 	add_executable(example example/main.cpp)
