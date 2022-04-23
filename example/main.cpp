@@ -11,7 +11,7 @@ class PNG
 {
   public:
     bool readPngFileAsGrayScale(std::string filename);
-    Eigen::VectorXf networkInputLayer();
+    Eigen::MatrixXf networkInputLayer();
 
   private:
     int width, height;
@@ -23,32 +23,34 @@ class PNG
 int main(int argc, char** argv)
 {
     PNG png;
-    png.readPngFileAsGrayScale("/data/Circle_3a9c6616-2a8c-11ea-8123-8363a7ec19e6.png");
+    png.readPngFileAsGrayScale(argv[1]);
     std::cout << png.networkInputLayer();
     return 0;
 }
 
-Eigen::VectorXf PNG::networkInputLayer()
+Eigen::MatrixXf PNG::networkInputLayer()
 {
-    Eigen::VectorXf v(width * height);
+    Eigen::MatrixXf m(height, width);
     for(int y = 0; y < height; y++)
     {
         png_bytep row = row_pointers[y];
         for(int x = 0; x < width; x++)
         {
-            png_bytep px      = &(row[x]);
-            float normalizedX = px[0] >> 8; // make range 0..255 to 0..1
-            v << normalizedX;
+            png_bytep px      = &(row[x * 2]);
+            float grayX = px[0]; 
+            float normalizedGrayX = grayX / 255; // make range 0..255 to 0..1
+            m(y, x) = normalizedGrayX;
         }
     }
-    return v;
+    return m;
 }
 
 bool PNG::readPngFileAsGrayScale(std::string filename)
 {
-    FILE* file = fopen(filename.c_str(), "rb");
+     FILE* file;
+     fopen_s(&file, filename.c_str(), "rb");
 
-    png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if(!png)
         return false;
 
@@ -97,14 +99,16 @@ bool PNG::readPngFileAsGrayScale(std::string filename)
     //                       If either weight is negative, default
     //                       weights (21268, 71514) are used.
     // http://www.libpng.org/pub/png/libpng-1.2.5-manual.html
-    if(color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_RGB_ALPHA)
-        png_set_rgb_to_gray_fixed(png, 2, 21268, 71514);
+     if(color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_RGB_ALPHA)
+     {
+        png_set_rgb_to_gray_fixed(png, 1, 21268, 71514);
+     }
+        
     else if(color_type == PNG_COLOR_TYPE_PALETTE)
     {
         png_set_palette_to_rgb(png);
         png_set_rgb_to_gray_fixed(png, 2, 21268, 71514);
     }
-
     png_read_update_info(png, info);
 
     if(row_pointers) abort();
