@@ -3,15 +3,19 @@
 
 #include <Eigen/Dense>
 
+#include <fstream>
 #include <iostream>
-
-using namespace biai;
+#include <filesystem>
+#include <vector>
+#include <map>
+#include <string>
 
 class PNG
 {
   public:
+    PNG(std::string filename);
     bool readPngFileAsGrayScale(std::string filename);
-    Eigen::MatrixXf networkInputLayer();
+    Eigen::VectorXf networkInputLayer();
 
   private:
     int width, height;
@@ -20,17 +24,67 @@ class PNG
     png_bytep* row_pointers = nullptr;
 };
 
+class Shapes
+{
+    public:
+        Shapes();
+        Eigen::VectorXf getVec(std::string shape);
+        std::string compare(Eigen::VectorXf probability);
+    private:
+        std::map<std::string, Eigen::VectorXf> map;
+};
+
+//First argument should be folder with training data
+//Second argument should be png to guess its shape
 int main(int argc, char** argv)
 {
-    PNG png;
-    png.readPngFileAsGrayScale(argv[1]);
-    std::cout << png.networkInputLayer();
+    std::unique_ptr<Shapes> shapes = std::make_unique<Shapes>();
+    //load every training png from data folder as grayscale
+    std::vector<Eigen::VectorXf> inputs;
+    std::vector<Eigen::VectorXf> outputs;
+    std::string path = argv[1];
+    for (auto & entry : fs::directory_iterator(path))
+    {
+        inputs.push_back(PNG(entry).networkInputLayer());
+
+        std::string shape = entry.substr(0, entry.find("_"));
+        outputs.push_back(shapes->getVec(shape));   
+    }
+
+    
+    //number of training pngs
+    std::size_t input_layer_size = inputs.size();
+    //number of shapes to guess
+    std::size_t ouput_layer_size = 9;
+    //idk
+    std::size_t hidden_layer_size = 69;
+
+    //create neural network
+    std::unique_ptr<biai::neural_network> nt = biai::neural_network::create()
+    .input_layer(input_layer_size)
+    .output_layer(ouput_layer_size)
+    .hidden_layer(hidden_layer_size)
+    .activation_function(std::make_unique<biai::sigmoid>())
+    .build();
+
+    //train neural network
+    nt->evaluate(inputs, outputs);
+
+    //guees the shape
+    Eigen::VectorXf shapeProbability = nt->predict(PNG(argv[2]).networkInputLayer());
+    std::cout << shapes->compare(shapeProbability) << std::endl;
+
     return 0;
 }
 
-Eigen::MatrixXf PNG::networkInputLayer()
+PNG::PNG(std::string filename)
 {
-    Eigen::MatrixXf m(height, width);
+    readPngFileAsGrayScale(filename);
+}
+
+Eigen::VectorXf PNG::networkInputLayer()
+{
+    Eigen::VectorXf vec(height * width);
     for(int y = 0; y < height; y++)
     {
         png_bytep row = row_pointers[y];
@@ -39,10 +93,10 @@ Eigen::MatrixXf PNG::networkInputLayer()
             png_bytep px      = &(row[x * 2]);
             float grayX = px[0]; 
             float normalizedGrayX = grayX / 255; // make range 0..255 to 0..1
-            m(y, x) = normalizedGrayX;
+            vec(y * height + x) = normalizedGrayX;
         }
     }
-    return m;
+    return vec;
 }
 
 bool PNG::readPngFileAsGrayScale(std::string filename)
@@ -126,4 +180,52 @@ bool PNG::readPngFileAsGrayScale(std::string filename)
     png_destroy_read_struct(&png, &info, NULL);
 
     return true;
+}
+
+Shapes::Shapes()
+{
+    map.insert({"Circle",   Eigen::VectorXf{1.f,0.f,0.f,0.f,0.f,0.f,0.f,0.f,0.f}});
+    map.insert({"Hexagon",  Eigen::VectorXf{0.f,1.f,0.f,0.f,0.f,0.f,0.f,0.f,0.f}});
+    map.insert({"Heptagon", Eigen::VectorXf{0.f,0.f,1.f,0.f,0.f,0.f,0.f,0.f,0.f}});
+    map.insert({"Nonagon",  Eigen::VectorXf{0.f,0.f,0.f,1.f,0.f,0.f,0.f,0.f,0.f}});
+    map.insert({"Octagon",  Eigen::VectorXf{0.f,0.f,0.f,0.f,1.f,0.f,0.f,0.f,0.f}});
+    map.insert({"Pentagon", Eigen::VectorXf{0.f,0.f,0.f,0.f,0.f,1.f,0.f,0.f,0.f}});
+    map.insert({"Square",   Eigen::VectorXf{0.f,0.f,0.f,0.f,0.f,0.f,1.f,0.f,0.f}});
+    map.insert({"Star",     Eigen::VectorXf{0.f,0.f,0.f,0.f,0.f,0.f,0.f,1.f,0.f}});
+    map.insert({"Triangle", Eigen::VectorXf{0.f,0.f,0.f,0.f,0.f,0.f,0.f,0.f,1.f}});
+}
+
+Eigen::VectorXf Shapes::getVec(std::string shape)
+{
+   return map.at(shape);
+}
+
+std::string Shapes::compare(Eigen::VectorXf probability)
+{
+    float highestValue = -1.f;
+    for (size_t  i = 0; i < probability.size(); i++)
+    {
+        if (probability[i] > highestValue)
+        {
+            highestValue = probability[i];
+        }
+    }
+    Eigen::VectorXf result(9);
+    for (size_t  i = 0; i < probability.size(); i++)
+    {
+        if (probability[i] == highestValue)
+        {
+            result << 1.f;
+        }
+        else
+        {
+            result << 0.f;
+        }
+    }
+    for (const auto& kv : map) 
+    {
+        if (kv.second == result)
+            return kv.first;
+    }
+    return "error";
 }
