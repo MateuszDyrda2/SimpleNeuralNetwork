@@ -68,21 +68,13 @@ class neural_network
     self_type operator=(self_type&& other) noexcept;
     ~neural_network();
 
-    void train(const array_t<vector_t>& inputs, const array_t<vector_t>& expected, float learningRate);
+    void train(const array_t<vector_t>& inputs, const array_t<vector_t>& expected);
     void evaluate(const array_t<vector_t>& inputs, const array_t<vector_t>& expected);
 
     vector_t predict(const vector_t& input);
     array_t<vector_t> predict(const array_t<vector_t>& input);
 
   private:
-#if 0
-    array_t<float> inputLayer;
-    array_t<size_type> layerSize;
-    array_t<array_t<float>> biases;
-    array_t<array_t<float>> outputs;
-    array_t<array_t<float>> deltas;
-    array_t<array_t<array_t<float>>> weights;
-#endif
     struct layer_t
     {
         vector_t biases;
@@ -97,8 +89,14 @@ class neural_network
             weights(matrix_t::Random(prev, size)) { }
     };
 
-    vector_t inputLayer;
-    array_t<layer_t> layers;
+    //   vector_t inputLayer;
+    //   array_t<layer_t> layers;
+    const std::size_t nbLayers;
+    std::vector<vector_t> outputs;
+    std::vector<vector_t> deltas;
+    std::vector<matrix_t> weights;
+    std::vector<vector_t> biases;
+    float learningRate = 0.1f;
 
     std::unique_ptr<activation_func> af;
 
@@ -107,9 +105,9 @@ class neural_network
     neural_network(network_builder& nb);
 
     void initialize_weights();
-    vector_t forward_pass();
+    void forward_pass();
     void backpropagate_error(const vector_t& expected);
-    void update_weights(float learningRate);
+    void update_weights();
 };
 
 inline neural_network::network_builder& neural_network::network_builder::input_layer(std::size_t size)
@@ -136,136 +134,99 @@ inline std::unique_ptr<neural_network> neural_network::network_builder::build()
 {
     return std::unique_ptr<neural_network>(new neural_network(*this));
 }
-inline neural_network::neural_network(network_builder& nb)
+inline neural_network::neural_network(network_builder& nb):
+    nbLayers(nb.hiddenLayers.size() + 2)
 {
     // store the activation function
     af = std::move(nb.af);
-    // set the number of inputs
-    inputLayer = matrix_t::Constant(nb.inputLayer, 1, 0.f);
-    // set the number of layers
-    auto prevSize = nb.inputLayer;
-    for(auto& size : nb.hiddenLayers)
+    // set the number of inputs + bias
+    auto currentNeuronSize = nb.inputLayer + 1;
+    outputs.emplace_back(currentNeuronSize);
+    deltas.emplace_back(currentNeuronSize);
+    for(const auto& nbNeurons : nb.hiddenLayers)
     {
-        layers.emplace_back(prevSize, size);
-        prevSize = size;
+        outputs.emplace_back(nbNeurons + 1);
+        deltas.emplace_back(nbNeurons + 1);
+        weights.emplace_back(matrix_t::Random(currentNeuronSize, nbNeurons));
+        biases.emplace_back(currentNeuronSize);
+        currentNeuronSize = nbNeurons + 1;
     }
-    layers.emplace_back(prevSize, nb.outputLayer);
+    outputs.emplace_back(nb.outputLayer);
+    deltas.emplace_back(nb.outputLayer);
+    weights.emplace_back(matrix_t::Random(currentNeuronSize, nb.outputLayer));
+    biases.emplace_back(currentNeuronSize);
 
     // for each weight in output and hidden layers generate a pseudorandom <0,1> number
     // initialize weights to a pseudo-random number between '0' and '1'
     // initialize bias to '0'
     // TODO: Initialize to a right value
 }
-inline void neural_network::train(const array_t<vector_t>& inputs, const array_t<vector_t>& expected, float learningRate)
+inline void neural_network::train(const array_t<vector_t>& inputs, const array_t<vector_t>& expected)
 {
-    assert(inputs.size() == inputLayer.size());
+    assert(inputs.size() == outputs.front().size() - 1);
+    std::vector<size_t> indices(inputs.size());
+    std::iota(indices.begin(), indices.end(), 0);
+    std::random_device dev;
+    std::mt19937 rng(dev);
+    std::shuffle(indices.begin(), indices.end(), rng);
+
     for(size_type i = 0; i < inputs.size(); ++i)
     {
-        inputLayer = inputs[i];
+        outputs[0] = inputs[indices.back()];
+        indices.pop_back();
         forward_pass();
         backpropagate_error(expected[i]);
-        update_weights(learningRate);
+        update_weights();
     }
 }
-inline neural_network::vector_t neural_network::forward_pass()
+inline void neural_network::forward_pass()
 {
-    auto* in = &inputLayer;
-    for(auto& layer : layers)
+    for(size_t i = 0; i < nbLayers - 1; ++i)
     {
-        layer.outputs = layer.weights * (*in) + layer.biases;
-        layer.outputs.unaryExpr([this](auto x) { return af->activate(x); });
-        in = &layer.outputs;
+        outputs[i + 1] = weights[i] * outputs[i] + biases[i];
+        outputs[i + 1].unaryExpr([this](auto x) { return af->activate(x); });
     }
-    return *in;
 }
 inline void neural_network::backpropagate_error(const vector_t& expected)
 {
-    // TODO: calculate with beta
-    //
-#if 0
     // backward propagation for the output layer
-    auto outSize = layerSize.back();
-    assert(outSize == expected.size());
-    for(size_t i = 0; i < outSize; ++i)
-    {
-        auto nOutput       = outputs[outSize][i];
-        deltas[outSize][i] = (nOutput - expected[i]) * nOutput * (1.f - nOutput);
-    }
-    // backward propagation for the hidden layers
-    for(size_t i = layerSize.size() - 2; i >= 0; --i)
-    {
-        for(size_t j = 0; j < layerSize[i]; ++j)
-        {
-            float error = 0.f;
-            for(size_t k = 0; k < layerSize[i + 1]; ++k)
-            {
-                error += weights[i + 1][k][j] * deltas[i + 1][k];
-            }
-            auto nOutput = outputs[i][j];
-            deltas[i][j] = nOutput * (1.f - nOutput) * error;
-        }
-    }
-#endif
-
-    auto& out = layers.back();
     // delta = (out - exp)
-    out.deltas = out.outputs - expected;
-    out.deltas.binaryExpr(out.outputs, [this](auto a, auto b) { return a * af->gradient(b); });
-    // delta = (sum(deltasn+1 * weightsn+1))
-    for(size_type i = layers.size() - 2; i >= 0; --i)
+    // delta = (sum(deltas(n+1) * weights(n+1)))
+    deltas.back() = outputs.back() - expected;
+    deltas.back().binaryExpr(outputs.back(), [this](auto a, auto b) { return a * af->gradient(b); });
+    deltas.back().transpose();
+
+    for(int i = deltas.size() - 2; i >= 0; --i)
     {
-        auto& layer  = layers[i];
-        auto& next   = layers[i + 1];
-        layer.deltas = next.weights * next.deltas;
-        layer.deltas.binaryExpr(layer.outputs, [this](auto a, auto b) { return a * af->gradient(b); });
+        deltas[i] = deltas[i + 1] * weights[i + 1];
+        deltas[i].binaryExpr(outputs[i], [this](auto a, auto b) { return a * af->gradient(b); });
+        deltas[i].transpose();
     }
 }
-inline void neural_network::update_weights(float learningRate)
+inline void neural_network::update_weights()
 {
-#if 0
-    auto in = &inputLayer;
-    // for each layer
-    for(size_type i = 0; i < weights.size(); ++i)
+    for(size_t i = 0; i < nbLayers; ++i)
     {
-        // for each neuron
-        for(size_type j = 0; j < weights[i].size(); ++j)
-        {
-            // for each weight
-            for(size_type k = 0; k < weights[i][j].size(); ++k)
-            {
-                weights[i][j][k] -= learningRate * deltas[i][j] * (*in)[k];
-            }
-            biases[i][j] -= learningRate * deltas[i][j];
-        }
-        in = &outputs[i];
-    }
-#endif
-    rvector_t in = inputLayer.transpose();
-    for(auto& layer : layers)
-    {
-        auto deltas = learningRate * layer.deltas * in;
-        layer.weights -= deltas;
-        auto biasDeltas = learningRate * layer.deltas;
-        layer.deltas -= biasDeltas;
-        in = layer.outputs.transpose();
+        weights[i] -= learningRate * outputs[i] * deltas[i];
+        biases[i] -= learningRate * deltas[i];
     }
 }
 inline neural_network::vector_t
 neural_network::predict(const vector_t& input)
 {
-    inputLayer = input;
-    return forward_pass();
+    outputs[0] = input;
+    forward_pass();
+    return outputs.back();
 }
 inline neural_network::array_t<neural_network::vector_t>
 neural_network::predict(const array_t<vector_t>& input)
 {
-    array_t<vector_t> output;
-    for(auto& in : input)
+    array_t<vector_t> out;
+    for(size_t i = 0; i < input.size(); ++i)
     {
-        inputLayer = in;
-        output.push_back(forward_pass());
+        out.push_back(predict(input[i]));
     }
-    return output;
+    return out;
 }
 
 } // namespace biai
