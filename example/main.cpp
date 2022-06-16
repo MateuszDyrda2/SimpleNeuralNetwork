@@ -3,12 +3,12 @@
 
 #include <Eigen/Dense>
 
+#include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <filesystem>
-#include <vector>
 #include <map>
 #include <string>
+#include <vector>
 
 class PNG
 {
@@ -26,53 +26,77 @@ class PNG
 
 class Shapes
 {
-    public:
-        Shapes();
-        Eigen::VectorXf getVec(std::string shape);
-        std::string compare(Eigen::VectorXf probability);
-    private:
-        std::map<std::string, Eigen::VectorXf> map;
+  public:
+    Shapes();
+    Eigen::VectorXf getVec(std::string shape);
+    std::string compare(Eigen::VectorXf probability);
+
+  private:
+    std::map<std::string, Eigen::VectorXf> map;
 };
 
-//First argument should be folder with training data
-//Second argument should be png to guess its shape
+// First argument should be folder with training data
+// Second argument should be png to guess its shape
 int main(int argc, char** argv)
 {
     std::unique_ptr<Shapes> shapes = std::make_unique<Shapes>();
-    //load every training png from data folder as grayscale
+    // load every training png from data folder as grayscale
     std::vector<Eigen::VectorXf> inputs;
     std::vector<Eigen::VectorXf> outputs;
-    std::string path = argv[1];
-    for (auto & entry : fs::directory_iterator(path))
+    // std::string path = argv[1];
+    std::string path = "../data/output";
+    for(auto& entry : std::filesystem::directory_iterator(path))
     {
-        inputs.push_back(PNG(entry).networkInputLayer());
+        auto file = entry.path();
+        inputs.push_back(PNG(file.string()).networkInputLayer());
 
-        std::string shape = entry.substr(0, entry.find("_"));
-        outputs.push_back(shapes->getVec(shape));   
+        auto stem         = file.stem();
+        std::string shape = stem.string().substr(0, stem.string().find("_"));
+        outputs.push_back(shapes->getVec(shape));
     }
+    //
+    //    // number of training pngs
+    //    std::size_t input_layer_size = inputs.size();
+    //    // number of shapes to guess
+    //    std::size_t ouput_layer_size = 9;
+    //    // idk
+    //    std::size_t hidden_layer_size = 69;
+    //
+    std::size_t inputLayerSize  = inputs.front().size();
+    std::size_t outputLayerSize = 9;
+    float alpha                 = 5;
+    std::size_t hiddenLayerSize = sqrt(inputLayerSize);
 
-    
-    //number of training pngs
-    std::size_t input_layer_size = inputs.size();
-    //number of shapes to guess
-    std::size_t ouput_layer_size = 9;
-    //idk
-    std::size_t hidden_layer_size = 69;
-
-    //create neural network
+    // create neural network
     std::unique_ptr<biai::neural_network> nt = biai::neural_network::create()
-    .input_layer(input_layer_size)
-    .output_layer(ouput_layer_size)
-    .hidden_layer(hidden_layer_size)
-    .activation_function(std::make_unique<biai::sigmoid>())
-    .build();
+                                                   .input_layer(inputLayerSize)
+                                                   .hidden_layer(hiddenLayerSize)
+                                                   .hidden_layer(hiddenLayerSize)
+                                                   .output_layer(outputLayerSize)
+                                                   .activation_function(std::make_unique<biai::sigmoid>())
+                                                   .build();
 
-    //train neural network
-    nt->evaluate(inputs, outputs);
+    // train neural network
+    // nt->evaluate(inputs, outputs);
+    std::cout << "Training...\n";
+    nt->train(inputs, outputs);
+    std::cout << "Finished\n";
+    // guees the shape
+    auto cmp = [](const auto& prob) {
+        auto max = std::max_element(prob.begin(), prob.end());
+        auto idx = std::distance(prob.begin(), max);
+        std::cout << "Prob: " << *max << " for index: " << idx << '\n';
+    };
 
-    //guees the shape
-    Eigen::VectorXf shapeProbability = nt->predict(PNG(argv[2]).networkInputLayer());
-    std::cout << shapes->compare(shapeProbability) << std::endl;
+    while(true)
+    {
+        std::cout << "Pass img to predict";
+        std::string path;
+        std::cin >> path;
+        Eigen::VectorXf shapeProbability = nt->predict(PNG(path).networkInputLayer());
+        cmp(shapeProbability);
+        // std::cout << shapes->compare(shapeProbability) << std::endl;
+    }
 
     return 0;
 }
@@ -90,10 +114,10 @@ Eigen::VectorXf PNG::networkInputLayer()
         png_bytep row = row_pointers[y];
         for(int x = 0; x < width; x++)
         {
-            png_bytep px      = &(row[x * 2]);
-            float grayX = px[0]; 
+            png_bytep px          = &(row[x * 2]);
+            float grayX           = px[0];
             float normalizedGrayX = grayX / 255; // make range 0..255 to 0..1
-            vec(y * height + x) = normalizedGrayX;
+            vec(y * height + x)   = normalizedGrayX;
         }
     }
     return vec;
@@ -101,10 +125,10 @@ Eigen::VectorXf PNG::networkInputLayer()
 
 bool PNG::readPngFileAsGrayScale(std::string filename)
 {
-     FILE* file;
-     fopen_s(&file, filename.c_str(), "rb");
+    FILE* file;
+    file = fopen(filename.c_str(), "rb");
 
-     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if(!png)
         return false;
 
@@ -153,11 +177,11 @@ bool PNG::readPngFileAsGrayScale(std::string filename)
     //                       If either weight is negative, default
     //                       weights (21268, 71514) are used.
     // http://www.libpng.org/pub/png/libpng-1.2.5-manual.html
-     if(color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_RGB_ALPHA)
-     {
+    if(color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_RGB_ALPHA)
+    {
         png_set_rgb_to_gray_fixed(png, 1, 21268, 71514);
-     }
-        
+    }
+
     else if(color_type == PNG_COLOR_TYPE_PALETTE)
     {
         png_set_palette_to_rgb(png);
@@ -184,36 +208,36 @@ bool PNG::readPngFileAsGrayScale(std::string filename)
 
 Shapes::Shapes()
 {
-    map.insert({"Circle",   Eigen::VectorXf{1.f,0.f,0.f,0.f,0.f,0.f,0.f,0.f,0.f}});
-    map.insert({"Hexagon",  Eigen::VectorXf{0.f,1.f,0.f,0.f,0.f,0.f,0.f,0.f,0.f}});
-    map.insert({"Heptagon", Eigen::VectorXf{0.f,0.f,1.f,0.f,0.f,0.f,0.f,0.f,0.f}});
-    map.insert({"Nonagon",  Eigen::VectorXf{0.f,0.f,0.f,1.f,0.f,0.f,0.f,0.f,0.f}});
-    map.insert({"Octagon",  Eigen::VectorXf{0.f,0.f,0.f,0.f,1.f,0.f,0.f,0.f,0.f}});
-    map.insert({"Pentagon", Eigen::VectorXf{0.f,0.f,0.f,0.f,0.f,1.f,0.f,0.f,0.f}});
-    map.insert({"Square",   Eigen::VectorXf{0.f,0.f,0.f,0.f,0.f,0.f,1.f,0.f,0.f}});
-    map.insert({"Star",     Eigen::VectorXf{0.f,0.f,0.f,0.f,0.f,0.f,0.f,1.f,0.f}});
-    map.insert({"Triangle", Eigen::VectorXf{0.f,0.f,0.f,0.f,0.f,0.f,0.f,0.f,1.f}});
+    map.insert({ "Circle", Eigen::VectorXf{ { 1.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f } } });
+    map.insert({ "Hexagon", Eigen::VectorXf{ { 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f } } });
+    map.insert({ "Heptagon", Eigen::VectorXf{ { 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f } } });
+    map.insert({ "Nonagon", Eigen::VectorXf{ { 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 0.f } } });
+    map.insert({ "Octagon", Eigen::VectorXf{ { 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f } } });
+    map.insert({ "Pentagon", Eigen::VectorXf{ { 0.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f } } });
+    map.insert({ "Square", Eigen::VectorXf{ { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f } } });
+    map.insert({ "Star", Eigen::VectorXf{ { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f } } });
+    map.insert({ "Triangle", Eigen::VectorXf{ { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f } } });
 }
 
 Eigen::VectorXf Shapes::getVec(std::string shape)
 {
-   return map.at(shape);
+    return map.at(shape);
 }
 
 std::string Shapes::compare(Eigen::VectorXf probability)
 {
     float highestValue = -1.f;
-    for (size_t  i = 0; i < probability.size(); i++)
+    for(size_t i = 0; i < probability.size(); i++)
     {
-        if (probability[i] > highestValue)
+        if(probability[i] > highestValue)
         {
             highestValue = probability[i];
         }
     }
     Eigen::VectorXf result(9);
-    for (size_t  i = 0; i < probability.size(); i++)
+    for(size_t i = 0; i < probability.size(); i++)
     {
-        if (probability[i] == highestValue)
+        if(probability[i] == highestValue)
         {
             result << 1.f;
         }
@@ -222,9 +246,9 @@ std::string Shapes::compare(Eigen::VectorXf probability)
             result << 0.f;
         }
     }
-    for (const auto& kv : map) 
+    for(const auto& kv : map)
     {
-        if (kv.second == result)
+        if(kv.second == result)
             return kv.first;
     }
     return "error";

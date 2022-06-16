@@ -5,3 +5,6 @@ build/
 
 # code dir
 .vscode/
+
+# data dir
+data/

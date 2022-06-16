@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <numeric>
 #include <random>
@@ -75,25 +77,9 @@ class neural_network
     array_t<vector_t> predict(const array_t<vector_t>& input);
 
   private:
-    struct layer_t
-    {
-        vector_t biases;
-        vector_t outputs;
-        vector_t deltas;
-        matrix_t weights;
-        layer_t() = default;
-        layer_t(size_type prev, size_type size):
-            biases(size),
-            outputs(size),
-            deltas(size),
-            weights(matrix_t::Random(prev, size)) { }
-    };
-
-    //   vector_t inputLayer;
-    //   array_t<layer_t> layers;
     const std::size_t nbLayers;
     std::vector<vector_t> outputs;
-    std::vector<vector_t> deltas;
+    std::vector<rvector_t> deltas;
     std::vector<matrix_t> weights;
     std::vector<vector_t> biases;
     float learningRate = 0.1f;
@@ -110,6 +96,10 @@ class neural_network
     void update_weights();
 };
 
+neural_network::network_builder neural_network::create()
+{
+    return network_builder();
+}
 inline neural_network::network_builder& neural_network::network_builder::input_layer(std::size_t size)
 {
     inputLayer = size;
@@ -140,43 +130,51 @@ inline neural_network::neural_network(network_builder& nb):
     // store the activation function
     af = std::move(nb.af);
     // set the number of inputs + bias
-    auto currentNeuronSize = nb.inputLayer + 1;
+    auto currentNeuronSize = nb.inputLayer;
     outputs.emplace_back(currentNeuronSize);
-    deltas.emplace_back(currentNeuronSize);
+    std::cout << "[Created input layer]\n";
     for(const auto& nbNeurons : nb.hiddenLayers)
     {
-        outputs.emplace_back(nbNeurons + 1);
-        deltas.emplace_back(nbNeurons + 1);
-        weights.emplace_back(matrix_t::Random(currentNeuronSize, nbNeurons));
-        biases.emplace_back(currentNeuronSize);
-        currentNeuronSize = nbNeurons + 1;
+        outputs.emplace_back(nbNeurons);
+        deltas.emplace_back(nbNeurons);
+        weights.emplace_back(matrix_t::Random(nbNeurons, currentNeuronSize));
+        biases.emplace_back(nbNeurons);
+        currentNeuronSize = nbNeurons;
+        std::cout << "[Created hidden layer]\n";
     }
     outputs.emplace_back(nb.outputLayer);
     deltas.emplace_back(nb.outputLayer);
-    weights.emplace_back(matrix_t::Random(currentNeuronSize, nb.outputLayer));
-    biases.emplace_back(currentNeuronSize);
+    weights.emplace_back(matrix_t::Random(nb.outputLayer, currentNeuronSize));
+    biases.emplace_back(nb.outputLayer);
+    std::cout << "[Created output layer]\n";
 
     // for each weight in output and hidden layers generate a pseudorandom <0,1> number
     // initialize weights to a pseudo-random number between '0' and '1'
     // initialize bias to '0'
     // TODO: Initialize to a right value
 }
+inline neural_network::~neural_network()
+{
+}
 inline void neural_network::train(const array_t<vector_t>& inputs, const array_t<vector_t>& expected)
 {
-    assert(inputs.size() == outputs.front().size() - 1);
+    assert(inputs.front().size() == outputs.front().size());
+
     std::vector<size_t> indices(inputs.size());
     std::iota(indices.begin(), indices.end(), 0);
-    std::random_device dev;
-    std::mt19937 rng(dev);
-    std::shuffle(indices.begin(), indices.end(), rng);
+    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+    std::shuffle(indices.begin(), indices.end(), std::default_random_engine(seed));
 
-    for(size_type i = 0; i < inputs.size(); ++i)
+    for(size_t i = 0; i < inputs.size(); ++i)
     {
-        outputs[0] = inputs[indices.back()];
+        auto now     = std::chrono::high_resolution_clock::now();
+        size_t index = indices.back();
         indices.pop_back();
+        outputs[0] = inputs[index];
         forward_pass();
-        backpropagate_error(expected[i]);
+        backpropagate_error(expected[index]);
         update_weights();
+        std::cout << "[Pass " << i << "/" << inputs.size() << " completed in]" << (std::chrono::high_resolution_clock::now() - now).count() * 0.000001 << " seconds\n";
     }
 }
 inline void neural_network::forward_pass()
@@ -192,23 +190,22 @@ inline void neural_network::backpropagate_error(const vector_t& expected)
     // backward propagation for the output layer
     // delta = (out - exp)
     // delta = (sum(deltas(n+1) * weights(n+1)))
-    deltas.back() = outputs.back() - expected;
-    deltas.back().binaryExpr(outputs.back(), [this](auto a, auto b) { return a * af->gradient(b); });
-    deltas.back().transpose();
+    vector_t delta = outputs.back() - expected;
+    delta.binaryExpr(outputs.back(), [this](auto a, auto b) { return a * af->gradient(b); });
+    deltas.front() = delta.transpose();
 
     for(int i = deltas.size() - 2; i >= 0; --i)
     {
         deltas[i] = deltas[i + 1] * weights[i + 1];
-        deltas[i].binaryExpr(outputs[i], [this](auto a, auto b) { return a * af->gradient(b); });
-        deltas[i].transpose();
+        deltas[i].binaryExpr(outputs[i + 1].transpose(), [this](auto a, auto b) { return a * af->gradient(b); });
     }
 }
 inline void neural_network::update_weights()
 {
-    for(size_t i = 0; i < nbLayers; ++i)
+    for(size_t i = 0; i < nbLayers - 1; ++i)
     {
-        weights[i] -= learningRate * outputs[i] * deltas[i];
-        biases[i] -= learningRate * deltas[i];
+        weights[i] -= (learningRate * outputs[i] * deltas[i]).transpose();
+        biases[i] -= (learningRate * deltas[i]).transpose();
     }
 }
 inline neural_network::vector_t
