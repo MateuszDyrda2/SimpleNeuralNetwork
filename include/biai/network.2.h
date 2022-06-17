@@ -12,8 +12,6 @@
 #include <random>
 #include <vector>
 
-#include <Eigen/Dense>
-
 namespace biai {
 // TODO:	implement batch vs mini batch vs stochastic gradient descent
 class neural_network
@@ -23,9 +21,6 @@ class neural_network
     using array_t   = std::vector<T>;
     using self_type = neural_network;
     using size_type = std::size_t;
-    using matrix_t  = Eigen::MatrixXf;
-    using vector_t  = Eigen::VectorXf;
-    using rvector_t = Eigen::RowVectorXf;
 
   public:
     class network_builder
@@ -56,21 +51,21 @@ class neural_network
     self_type operator=(self_type&& other) noexcept;
     ~neural_network();
 
-    void train(const array_t<vector_t>& inputs, const array_t<vector_t>& expected);
-    void evaluate(const array_t<vector_t>& inputs, const array_t<vector_t>& expected);
+    void train(const std::vector<std::vector<float>>& inputs, const std::vector<std::vector<float>>& expected);
+    void evaluate(const std::vector<std::vector<float>>& inputs, const std::vector<std::vector<float>>& expected);
 
-    vector_t predict(const vector_t& input);
-    array_t<vector_t> predict(const array_t<vector_t>& input);
+    std::vector<float> predict(const std::vector<float>& input);
+    std::vector<std::vector<float>> predict(const std::vector<std::vector<float>>& input);
 
   private:
     const std::size_t nbLayers;
     std::vector<size_t> nbNeurons;
-    std::vector<vector_t> outputs;
-    std::vector<vector_t> deltas;
-    std::vector<matrix_t> weights;
-    std::vector<matrix_t> dWeights;
-    std::vector<vector_t> biases;
-    std::vector<vector_t> dBiases;
+    std::vector<std::vector<float>> outputs;
+    std::vector<std::vector<float>> deltas;
+    std::vector<std::vector<std::vector<float>>> weights;
+    std::vector<std::vector<std::vector<float>>> dWeights;
+    std::vector<std::vector<float>> biases;
+    std::vector<std::vector<float>> dBiases;
     float learningRate = 0.1f;
     float momentum     = 0.9f;
 
@@ -84,7 +79,7 @@ class neural_network
     void initialize_biases();
 
     void forward_pass();
-    void backpropagate_error(const vector_t& expected);
+    void backpropagate_error(const std::vector<float>& expected);
     void update_weights();
 };
 
@@ -127,7 +122,7 @@ inline neural_network::neural_network(network_builder& nb):
 inline neural_network::~neural_network()
 {
 }
-inline void neural_network::train(const array_t<vector_t>& inputs, const array_t<vector_t>& expected)
+inline void neural_network::train(const std::vector<std::vector<float>>& inputs, const std::vector<std::vector<float>>& expected)
 {
     assert(inputs.front().size() == outputs.front().size());
 
@@ -146,9 +141,12 @@ inline void neural_network::train(const array_t<vector_t>& inputs, const array_t
         backpropagate_error(expected[index]);
         update_weights();
         std::cout << "[Pass " << i << "/" << inputs.size() << " completed in " << (std::chrono::high_resolution_clock::now() - now).count() * 0.000000001 << " seconds]";
-        vector_t MSE = expected[index] - outputs.back();
-        MSE          = MSE.cwiseProduct(MSE);
-        auto err     = MSE.sum() / MSE.size();
+        float MSE = 0.f;
+        for(size_t j = 0; j < expected[index].size(); ++j)
+        {
+            MSE += expected[index][j] - outputs.back()[j];
+        }
+        auto err = MSE / expected[index].size();
         std::cout << " MSE = " << err << '\n';
     }
 }
@@ -156,56 +154,63 @@ inline void neural_network::forward_pass()
 {
     for(size_t i = 0; i < nbLayers - 1; ++i)
     {
-        outputs[i + 1] = weights[i] * outputs[i] + biases[i];
-        outputs[i + 1] = outputs[i + 1].unaryExpr([this](auto x) { return 1.f / (1.f + std::exp(-x)); });
+        for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
+        {
+            float sum = biases[i][j];
+            for(size_t k = 0; k < nbNeurons[i]; ++k)
+            {
+                sum += weights[i][j][k] * outputs[i][k];
+            }
+            outputs[i + 1][j] = 1.f / (1.f + std::exp(-sum));
+        }
     }
 }
-inline void neural_network::backpropagate_error(const vector_t& expected)
+inline void neural_network::backpropagate_error(const std::vector<float>& expected)
 {
-    auto& outputLayerDeltas  = deltas.back();
-    auto& outputLayerOutputs = outputs.back();
-    // delta = 2(a - y) o a o (1 - a)
-    outputLayerDeltas = 2 * (expected - outputLayerOutputs);
-    outputLayerDeltas = outputLayerDeltas.cwiseProduct(outputLayerOutputs);
-    const auto nld    = vector_t::Ones(nbNeurons.back(), 1) - outputLayerOutputs;
-    outputLayerDeltas = outputLayerDeltas.cwiseProduct(nld);
-
+    for(size_t i = 0; i < nbNeurons.back(); ++i)
+    {
+        deltas.back()[i] = (expected[i] - outputs.back()[i]) * outputs.back()[i] * (1.f - outputs.back()[i]);
+    }
     for(size_t i = nbLayers - 2; i > 0; --i)
     {
-        // delta = a o (1 - a) o W^T * delta(n + 1)
-        auto& layerDeltas     = deltas[i - 1];
-        auto& layerWeights    = weights[i];
-        auto& nextLayerDeltas = deltas[i];
-        auto& layerOutputs    = outputs[i];
-        layerDeltas           = layerOutputs.cwiseProduct(vector_t::Ones(nbNeurons[i], 1) - layerOutputs);
-        const auto nld        = layerWeights.transpose() * nextLayerDeltas;
-        layerDeltas           = layerDeltas.cwiseProduct(nld);
+        for(size_t j = 0; j < nbNeurons[i]; ++j)
+        {
+            float delta = 0.f;
+            for(size_t k = 0; j < nbNeurons[i + 1]; ++k)
+            {
+                delta += weights[i][k][j] * deltas[i][k];
+            }
+            deltas[i - 1][j] = delta * outputs[i][j] * (1.f - outputs[i][j]);
+        }
     }
 }
 inline void neural_network::update_weights()
 {
-    for(size_t i = 0; i < nbLayers - 1; ++i)
+    for(size_t i = 1; i < nbLayers; ++i)
     {
-        dBiases[i]  = learningRate * deltas[i] + momentum * dBiases[i];
-        dWeights[i] = learningRate * deltas[i] * outputs[i].transpose() + momentum * dWeights[i];
-    }
-    for(size_t i = 0; i < nbLayers - 1; ++i)
-    {
-        biases[i] += dBiases[i];
-        dWeights[i] += dWeights[i];
+        for(size_t j = 0; j < nbNeurons[i]; ++j)
+        {
+            for(size_t k = 0; k < nbNeurons[i - 1]; ++k)
+            {
+                dWeights[i][j][k] = learningRate * deltas[i][j] * outputs[i - 1][k] + momentum * dWeights[i][j][k];
+                weights[i][j][k] += dWeights[i][j][k];
+            }
+            dBiases[i][j] = deltas[i][j];
+            biases[i][j] += dBiases[i][j];
+        }
     }
 }
-inline neural_network::vector_t
-neural_network::predict(const vector_t& input)
+inline std::vector<float>
+neural_network::predict(const std::vector<float>& input)
 {
     outputs[0] = input;
     forward_pass();
     return outputs.back();
 }
-inline neural_network::array_t<neural_network::vector_t>
-neural_network::predict(const array_t<vector_t>& input)
+inline std::vector<std::vector<float>>
+neural_network::predict(const std::vector<std::vector<float>>& input)
 {
-    array_t<vector_t> out;
+    std::vector<std::vector<float>> out;
     for(size_t i = 0; i < input.size(); ++i)
     {
         out.push_back(predict(input[i]));
@@ -227,13 +232,26 @@ inline void neural_network::initialize_weights()
     std::cout << "Initializing weights: ";
     weights.reserve(nbLayers - 1);
     dWeights.reserve(nbLayers - 1);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dist(-1.f, 1.f);
     float a = 2.38f;
     for(size_t i = 1; i < nbLayers; ++i)
     {
-        float initValue = a / sqrt(nbNeurons[i - 1]);
-        weights.emplace_back(Eigen::MatrixXf::Random(nbNeurons[i], nbNeurons[i - 1]));
-        weights.back() = weights.back().unaryExpr([&](auto e) { return e * initValue; });
-        dWeights.emplace_back(Eigen::MatrixXf::Zero(nbNeurons[i], nbNeurons[i - 1]));
+        float initValue = a / sqrt(nbNeurons[i]);
+        weights.emplace_back();
+        dWeights.emplace_back();
+        for(size_t j = 0; j < nbNeurons[i]; ++j)
+        {
+            weights.back().emplace_back(nbNeurons[i - 1]);
+            dWeights.back().emplace_back(nbNeurons[i - 1]);
+            for(size_t k = 0; k < nbNeurons[i - 1]; ++k)
+            {
+                weights.back().back().push_back(dist(gen) * initValue);
+                dWeights.back().back().push_back(0);
+            }
+        }
     }
     std::cout << "done\n";
 }
@@ -255,8 +273,8 @@ inline void neural_network::initialize_biases()
     dBiases.reserve(nbLayers - 1);
     for(size_t i = 1; i < nbLayers; ++i)
     {
-        biases.emplace_back(vector_t::Zero(nbNeurons[i]));
-        dBiases.emplace_back(vector_t::Zero(nbNeurons[i]));
+        biases.emplace_back(nbNeurons[i], 0);
+        dBiases.emplace_back(nbNeurons[i], 0);
     }
     std::cout << "done\n";
 }
