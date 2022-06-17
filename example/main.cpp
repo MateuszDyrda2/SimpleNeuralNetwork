@@ -64,8 +64,7 @@ int main(int argc, char** argv)
     //
     std::size_t inputLayerSize  = inputs.front().size();
     std::size_t outputLayerSize = 9;
-    float alpha                 = 5;
-    std::size_t hiddenLayerSize = sqrt(inputLayerSize);
+    std::size_t hiddenLayerSize = 200;
 
     // create neural network
     std::unique_ptr<biai::neural_network> nt = biai::neural_network::create()
@@ -82,11 +81,6 @@ int main(int argc, char** argv)
     nt->train(inputs, outputs);
     std::cout << "Finished\n";
     // guees the shape
-    auto cmp = [](const auto& prob) {
-        auto max = std::max_element(prob.begin(), prob.end());
-        auto idx = std::distance(prob.begin(), max);
-        std::cout << "Prob: " << *max << " for index: " << idx << '\n';
-    };
 
     while(true)
     {
@@ -94,7 +88,12 @@ int main(int argc, char** argv)
         std::string path;
         std::cin >> path;
         Eigen::VectorXf shapeProbability = nt->predict(PNG(path).networkInputLayer());
-        cmp(shapeProbability);
+        std::cout << "[ ";
+        for(auto& elem : shapeProbability)
+        {
+            std::cout << elem << ", ";
+        }
+        std::cout << "]\n";
         // std::cout << shapes->compare(shapeProbability) << std::endl;
     }
 
