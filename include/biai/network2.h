@@ -12,14 +12,12 @@
 #include <random>
 #include <vector>
 
-#include <Eigen/Dense>
-
 namespace biai {
 // TODO:	implement batch vs mini batch vs stochastic gradient descent
 class dataset
 {
   public:
-    using entry_t = std::pair<Eigen::VectorXf, Eigen::VectorXf>;
+    using entry_t = std::pair<std::vector<float>, std::vector<float>>;
 
   public:
     dataset() = default;
@@ -35,14 +33,31 @@ class dataset
 };
 class neural_network
 {
+  private:
+    class matrix_t
+    {
+        std::vector<float> data;
+        size_t columns;
+
+      public:
+        matrix_t(size_t rows, size_t columns):
+            data(rows * columns), columns(columns) { }
+        float& operator()(size_t i, size_t j)
+        {
+            return data[i * columns + j];
+        }
+        const float& operator()(size_t i, size_t j) const
+        {
+            return data[i * columns + j];
+        }
+    };
+
   public:
     template<class T>
     using array_t   = std::vector<T>;
     using self_type = neural_network;
     using size_type = std::size_t;
-    using matrix_t  = Eigen::MatrixXf;
-    using vector_t  = Eigen::VectorXf;
-    using rvector_t = Eigen::RowVectorXf;
+    using vector_t  = std::vector<float>;
 
   public:
     class network_builder
@@ -222,9 +237,10 @@ inline void neural_network::train_epoch(const std::vector<dataset::entry_t>& tra
         forward_pass(entry.first);
         backpropagate_error(entry);
         if(learnStochastic) update_weights();
-        vector_t MSE = outputs.back() - entry.second;
-        MSE          = MSE.cwiseProduct(MSE);
-        mse += MSE.sum();
+        for(size_t i = 0; i < outputs.back().size(); ++i)
+        {
+            mse += (outputs.back()[i] - entry.second[i]) * (outputs.back()[i] - entry.second[i]);
+        }
         std::cout << "[ pass " << passCnt++ << " of " << trainingSet.size() << " completed ]\n";
     }
     if(!learnStochastic) update_weights();
@@ -236,69 +252,98 @@ inline float neural_network::predict_test(const std::vector<dataset::entry_t>& t
     for(const auto& entry : testSet)
     {
         forward_pass(entry.first);
-        vector_t MSE = outputs.back() - entry.second;
-        MSE          = MSE.cwiseProduct(MSE);
-        mse += MSE.sum();
+        for(size_t i = 0; i < outputs.back().size(); ++i)
+        {
+            mse += (outputs.back()[i] - entry.second[i]) * (outputs.back()[i] - entry.second[i]);
+        }
     }
     mse /= testSet.size();
     return mse;
 }
 inline void neural_network::forward_pass(const vector_t& trainingSet)
 {
-    outputs[0] = weights[0] * trainingSet + biases[0];
-    outputs[0] = outputs[0].unaryExpr([this](auto x) { return 1.f / (1.f + std::exp(-x)); });
-
+    for(size_t i = 0; i < nbNeurons[1]; ++i)
+    {
+        float val = biases[0][i];
+        for(size_t j = 0; j < nbNeurons[0]; ++j)
+        {
+            val += trainingSet[j] * weights[0](i, j);
+        }
+        outputs[0][i] = 1.f / (1.f + std::exp(-val));
+    }
     for(size_t i = 1; i < nbLayers - 1; ++i)
     {
-        outputs[i] = weights[i] * outputs[i - 1] + biases[i];
-        outputs[i] = outputs[i].unaryExpr([this](auto x) { return 1.f / (1.f + std::exp(-x)); });
+        for(size_t j = 0; j < nbNeurons[i + 1]; ++i)
+        {
+            float val = biases[i][j];
+            for(size_t k = 0; k < nbNeurons[i]; ++k)
+            {
+                val += outputs[i - 1][k] * weights[i](j, k);
+            }
+            outputs[i][j] = 1.f / (1.f + std::exp(-val));
+        }
     }
 }
 inline void neural_network::backpropagate_error(const dataset::entry_t& trainingSet)
 {
-    auto& outputLayerDeltas  = deltas.back();
-    auto& outputLayerOutputs = outputs.back();
-    // delta = 2(a - y) o a o (1 - a)
-    outputLayerDeltas = (outputLayerOutputs - trainingSet.second);
-    outputLayerDeltas = outputLayerDeltas.cwiseProduct(outputLayerOutputs);
-    const auto nld    = vector_t::Ones(nbNeurons.back(), 1) - outputLayerOutputs;
-    outputLayerDeltas = outputLayerDeltas.cwiseProduct(nld);
-
-    for(size_t i = nbLayers - 2; i > 0; --i)
+    for(size_t i = 0; i < nbNeurons.back(); ++i)
     {
-        // delta = a o (1 - a) o W^T * delta(n + 1)
-        auto& layerDeltas     = deltas[i - 1];
-        auto& layerWeights    = weights[i];
-        auto& nextLayerDeltas = deltas[i];
-        auto& layerOutputs    = outputs[i - 1];
-        const auto omo        = vector_t::Ones(nbNeurons[i], 1) - layerOutputs;
-        layerDeltas           = layerOutputs.cwiseProduct(omo);
-        const auto nld        = layerWeights.transpose() * nextLayerDeltas;
-        layerDeltas           = layerDeltas.cwiseProduct(nld);
+        deltas.back()[i] = (outputs.back()[i] - trainingSet.second[i]) * outputs.back()[i] * (1.f - outputs.back()[i]);
     }
-    // input layer
+    for(int i = nbLayers - 3; i >= 0; --i)
+    {
+        for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
+        {
+            float val = 0.f;
+            for(size_t k = 0; k < nbNeurons[i]; ++k)
+            {
+                val += deltas[i + 1][k] * weights[i](j, k);
+            }
+            deltas[i][j] = outputs[i][j] * (1.f - outputs[i][j]) * val;
+        }
+    }
     if(learnStochastic)
     {
-        dBiases[0]  = learningRate * deltas[0];                                 //+ momentum * dBiases[0];
-        dWeights[0] = learningRate * deltas[0] * trainingSet.first.transpose(); // + momentum * dWeights[0];
+        for(size_t i = 0; i < nbNeurons[1]; ++i)
+        {
+            dBiases[0][i] = learningRate * deltas[0][i] + momentum * dBiases[0][i];
+            for(size_t j = 0; j < nbNeurons[0]; ++j)
+            {
+                dWeights[0](i, j) = learningRate * deltas[0][i] * trainingSet.first[j] + momentum * dWeights[0](i, j);
+            }
+        }
+        for(size_t i = 1; i < nbLayers - 1; ++i)
+        {
+            for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
+            {
+                dBiases[i][j] = learningRate * deltas[i][j] + momentum * dBiases[i][j];
+                for(size_t k = 0; k < nbNeurons[i]; ++k)
+                {
+                    dWeights[i](j, k) = learningRate * deltas[i][j] + momentum * dWeights[i](j, k);
+                }
+            }
+        }
     }
     else
     {
-        dBiases[0] += learningRate * deltas[0];
-        dWeights[0] += learningRate * deltas[0] * trainingSet.first.transpose();
-    }
-
-    for(size_t i = 1; i < nbLayers - 1; ++i)
-    {
-        if(learnStochastic)
+        for(size_t i = 0; i < nbNeurons[1]; ++i)
         {
-            dBiases[i]  = learningRate * deltas[i];                              // + momentum * dBiases[i];
-            dWeights[i] = learningRate * deltas[i] * outputs[i - 1].transpose(); // + momentum * dWeights[i];
+            dBiases[0][i] += learningRate * deltas[0][i];
+            for(size_t j = 0; j < nbNeurons[0]; ++j)
+            {
+                dWeights[0](i, j) += learningRate * deltas[0][i] * trainingSet.first[j];
+            }
         }
-        else
+        for(size_t i = 1; i < nbLayers - 1; ++i)
         {
-            dBiases[i] -= learningRate * deltas[i];
-            dWeights[i] -= learningRate * deltas[i] * outputs[i - 1].transpose();
+            for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
+            {
+                dBiases[i][j] += learningRate * deltas[i][j];
+                for(size_t k = 0; k < nbNeurons[i]; ++k)
+                {
+                    dWeights[i](j, k) += learningRate * deltas[i][j];
+                }
+            }
         }
     }
 }
@@ -306,15 +351,27 @@ inline void neural_network::update_weights()
 {
     for(size_t i = 0; i < nbLayers - 1; ++i)
     {
-        biases[i] += dBiases[i];
-        weights[i] += dWeights[i];
+        for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
+        {
+            biases[i][j] += dBiases[i][j];
+            for(size_t k = 0; k < nbNeurons[i]; ++k)
+            {
+                weights[i](j, k) += dWeights[i](j, k);
+            }
+        }
     }
     if(!learnStochastic)
     {
         for(size_t i = 0; i < nbLayers - 1; ++i)
         {
-            dBiases[i].setZero();
-            dWeights[i].setZero();
+            for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
+            {
+                dBiases[i][j] = 0.f;
+                for(size_t k = 0; k < nbNeurons[i]; ++k)
+                {
+                    dWeights[i](j, k) = 0.f;
+                }
+            }
         }
     }
 }
@@ -350,13 +407,24 @@ inline void neural_network::initialize_weights()
     std::cout << "Initializing weights: ";
     weights.reserve(nbLayers - 1);
     dWeights.reserve(nbLayers - 1);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dist(-1.f, 1.f);
     float a = 2.38f;
-    for(size_t i = 1; i < nbLayers; ++i)
+    for(size_t i = 0; i < nbLayers - 1; ++i)
     {
-        float initValue = a / sqrt(nbNeurons[i - 1]);
-        weights.emplace_back(Eigen::MatrixXf::Random(nbNeurons[i], nbNeurons[i - 1]));
-        weights.back() = weights.back().unaryExpr([&](auto e) { return e * initValue; });
-        dWeights.emplace_back(Eigen::MatrixXf::Zero(nbNeurons[i], nbNeurons[i - 1]));
+        float initValue = a / sqrt(nbNeurons[i]);
+        weights.emplace_back(nbNeurons[i + 1], nbNeurons[i]);
+        dWeights.emplace_back(nbNeurons[i + 1], nbNeurons[i]);
+        for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
+        {
+            for(size_t k = 0; k < nbNeurons[i]; ++k)
+            {
+                weights[i](j, k)  = dist(gen) * initValue;
+                dWeights[i](j, k) = 0;
+            }
+        }
     }
     std::cout << "done\n";
 }
@@ -378,8 +446,8 @@ inline void neural_network::initialize_biases()
     dBiases.reserve(nbLayers - 1);
     for(size_t i = 1; i < nbLayers; ++i)
     {
-        biases.emplace_back(vector_t::Zero(nbNeurons[i]));
-        dBiases.emplace_back(vector_t::Zero(nbNeurons[i]));
+        biases.emplace_back(nbNeurons[i], 0);
+        dBiases.emplace_back(nbNeurons[i], 0);
     }
     std::cout << "done\n";
 }
