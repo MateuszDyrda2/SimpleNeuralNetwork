@@ -288,7 +288,7 @@ inline void neural_network::backpropagate_error(const dataset::entry_t& training
 {
     for(size_t i = 0; i < nbNeurons.back(); ++i)
     {
-        deltas.back()[i] = (outputs.back()[i] - trainingSet.second[i]) * outputs.back()[i] * (1.f - outputs.back()[i]);
+        deltas.back()[i] = (trainingSet.second[i] - outputs.back()[i]) * outputs.back()[i] * (1.f - outputs.back()[i]);
     }
     for(int i = nbLayers - 3; i >= 0; --i)
     {
@@ -414,7 +414,7 @@ inline void neural_network::initialize_weights()
     float a = 2.38f;
     for(size_t i = 0; i < nbLayers - 1; ++i)
     {
-        float initValue = a / sqrt(nbNeurons[i]);
+        float initValue = 1 / sqrt(nbNeurons[i]);
         weights.emplace_back(nbNeurons[i + 1], nbNeurons[i]);
         dWeights.emplace_back(nbNeurons[i + 1], nbNeurons[i]);
         for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
