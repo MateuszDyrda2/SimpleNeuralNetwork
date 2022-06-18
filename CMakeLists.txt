@@ -15,8 +15,8 @@ add_subdirectory(external/eigen)
 
 project(biai VERSION ${biai_VERSION})
 
-set(CMAKE_CXX_VERSION 20)
-set(CMAKE_CXX_VERSION_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 
 set(biai_BUILD_EXAMPLE ON)
