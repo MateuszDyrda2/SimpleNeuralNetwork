@@ -125,7 +125,7 @@ class neural_network
     void initialize_deltas();
     void initialize_biases();
 
-    void train_epoch(const std::vector<dataset::entry_t>& trainingSet);
+    float train_epoch(const std::vector<dataset::entry_t>& trainingSet);
     float predict_test(const std::vector<dataset::entry_t>& testSet);
 
     void forward_pass(const vector_t& trainingSet);
@@ -222,13 +222,13 @@ inline void neural_network::train(const dataset& ds)
 {
     for(size_t i = 0; i < maxEpochs; ++i)
     {
-        auto now = std::chrono::high_resolution_clock::now();
-        train_epoch(ds.entries);
-        float MSE = predict_test(ds.testEntries);
-        std::cout << "[ epoch " << i << " completed in " << (std::chrono::high_resolution_clock::now() - now).count() * 0.000000001 << "with MSE = " << MSE << '\n';
+        auto now   = std::chrono::high_resolution_clock::now();
+        float mse1 = train_epoch(ds.entries);
+        float MSE  = predict_test(ds.testEntries);
+        std::cout << "\n[ epoch " << i << " completed in " << (std::chrono::high_resolution_clock::now() - now).count() * 0.000000001 << "with MSE = " << MSE << " and epoch MSE = " << mse1 << '\n';
     }
 }
-inline void neural_network::train_epoch(const std::vector<dataset::entry_t>& trainingSet)
+inline float neural_network::train_epoch(const std::vector<dataset::entry_t>& trainingSet)
 {
     float mse      = 0.f;
     size_t passCnt = 1;
@@ -241,10 +241,11 @@ inline void neural_network::train_epoch(const std::vector<dataset::entry_t>& tra
         {
             mse += (outputs.back()[i] - entry.second[i]) * (outputs.back()[i] - entry.second[i]);
         }
-        std::cout << "[ pass " << passCnt++ << " of " << trainingSet.size() << " completed ]\n";
+        std::cout << "\r[ pass " << passCnt++ << " of " << trainingSet.size() << " completed ]" << std::flush;
     }
     if(!learnStochastic) update_weights();
     mse /= trainingSet.size();
+    return mse;
 }
 inline float neural_network::predict_test(const std::vector<dataset::entry_t>& testSet)
 {
@@ -273,7 +274,7 @@ inline void neural_network::forward_pass(const vector_t& trainingSet)
     }
     for(size_t i = 1; i < nbLayers - 1; ++i)
     {
-        for(size_t j = 0; j < nbNeurons[i + 1]; ++i)
+        for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
         {
             float val = biases[i][j];
             for(size_t k = 0; k < nbNeurons[i]; ++k)
@@ -297,7 +298,7 @@ inline void neural_network::backpropagate_error(const dataset::entry_t& training
         for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
         {
             float val = 0.f;
-            for(size_t k = 0; k < nbNeurons[i]; ++k)
+            for(size_t k = 0; k < nbNeurons[i + 2]; ++k)
             {
                 val += deltas[i + 1][k] * weights[i + 1](k, j);
             }
