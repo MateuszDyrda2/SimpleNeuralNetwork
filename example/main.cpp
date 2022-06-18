@@ -4,7 +4,7 @@
 using namespace biai;
 int main(void)
 {
-#if 0
+#if 1
     std::vector<dataset::entry_t> entries;
     dataset::entry_t entry;
 
@@ -27,30 +27,31 @@ int main(void)
                   .output_layer(1)
                   .learn_stochastic(true)
                   .learning_rate(0.1)
-                  .max_epochs(1000)
+                  .training_momentum(0.9)
+                  .max_epochs(10000)
                   .build();
 
     nn->train(entries);
 
     std::cout << "Predicting for examples\n";
-    auto res = nn->predict(neural_network::vector_t{ 0.f, 0.f });
+    auto res = nn->predict({ 0.f, 0.f });
     std::cout << "for [0,0] -> " << res[0] << '\n';
 
-    auto res2 = nn->predict(neural_network::vector_t{ 1.f, 0.f });
-    std::cout << "for [1,0] -> " << res[0] << '\n';
+    auto res2 = nn->predict({ 1.f, 0.f });
+    std::cout << "for [1,0] -> " << res2[0] << '\n';
 
-    auto res3 = nn->predict(neural_network::vector_t{ 0.f, 1.f });
-    std::cout << "for [0,1] -> " << res[0] << '\n';
+    auto res3 = nn->predict({ 0.f, 1.f });
+    std::cout << "for [0,1] -> " << res3[0] << '\n';
 
-    auto res4 = nn->predict(neural_network::vector_t{ 1.f, 1.f });
-    std::cout << "for [1,1] -> " << res[0] << '\n';
+    auto res4 = nn->predict({ 1.f, 1.f });
+    std::cout << "for [1,1] -> " << res4[0] << '\n';
 
 #endif
-#if 1
+#if 0
     std::vector<dataset::entry_t> entries;
     dataset::entry_t entry{ { 0.f, 0.f }, { 0.f } };
-    dataset::entry_t entry2{ { 1.f, 0.f }, { 0.f } };
-    dataset::entry_t entry3{ { 0.f, 1.f }, { 0.f } };
+    dataset::entry_t entry2{ { 1.f, 0.f }, { 1.f } };
+    dataset::entry_t entry3{ { 0.f, 1.f }, { 1.f } };
     dataset::entry_t entry4{ { 1.f, 1.f }, { 1.f } };
     entries.push_back(entry);
     entries.push_back(entry2);
@@ -60,9 +61,9 @@ int main(void)
     auto nn = neural_network::create()
                   .input_layer(2)
                   .output_layer(1)
-                  .learn_stochastic(true)
+                  .learn_stochastic(false)
                   .learning_rate(0.1)
-                  .max_epochs(1000)
+                  .max_epochs(10000)
                   .build();
 
     nn->train(entries);

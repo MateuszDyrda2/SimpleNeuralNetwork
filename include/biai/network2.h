@@ -288,7 +288,9 @@ inline void neural_network::backpropagate_error(const dataset::entry_t& training
 {
     for(size_t i = 0; i < nbNeurons.back(); ++i)
     {
-        deltas.back()[i] = (trainingSet.second[i] - outputs.back()[i]) * outputs.back()[i] * (1.f - outputs.back()[i]);
+        deltas.back()[i] = (1.f / nbNeurons.back())
+                           * (trainingSet.second[i] - outputs.back()[i])
+                           * outputs.back()[i] * (1.f - outputs.back()[i]);
     }
     for(int i = nbLayers - 3; i >= 0; --i)
     {
@@ -297,7 +299,7 @@ inline void neural_network::backpropagate_error(const dataset::entry_t& training
             float val = 0.f;
             for(size_t k = 0; k < nbNeurons[i]; ++k)
             {
-                val += deltas[i + 1][k] * weights[i](j, k);
+                val += deltas[i + 1][k] * weights[i + 1](k, j);
             }
             deltas[i][j] = outputs[i][j] * (1.f - outputs[i][j]) * val;
         }
@@ -319,7 +321,7 @@ inline void neural_network::backpropagate_error(const dataset::entry_t& training
                 dBiases[i][j] = learningRate * deltas[i][j] + momentum * dBiases[i][j];
                 for(size_t k = 0; k < nbNeurons[i]; ++k)
                 {
-                    dWeights[i](j, k) = learningRate * deltas[i][j] + momentum * dWeights[i](j, k);
+                    dWeights[i](j, k) = learningRate * deltas[i][j] * outputs[i - 1][k] + momentum * dWeights[i](j, k);
                 }
             }
         }
@@ -341,7 +343,7 @@ inline void neural_network::backpropagate_error(const dataset::entry_t& training
                 dBiases[i][j] += learningRate * deltas[i][j];
                 for(size_t k = 0; k < nbNeurons[i]; ++k)
                 {
-                    dWeights[i](j, k) += learningRate * deltas[i][j];
+                    dWeights[i](j, k) += learningRate * deltas[i][j] * outputs[i - 1][k];
                 }
             }
         }
