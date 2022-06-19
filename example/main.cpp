@@ -16,23 +16,19 @@ int main(int argc, char** argv)
     std::vector<dataset::entry_t> entries;
 
     std::string path = "../data/output3";
-    std::regex square("(square)");
-    std::regex circle("(circle)");
-    std::regex triangle("(triangle)");
-    std::regex star("(star)");
     for(auto& entry : std::filesystem::directory_iterator(path))
     {
         auto file = entry.path();
         dataset::entry_t en;
         en.first  = to_vector(file.string());
         auto stem = file.stem();
-        if(std::regex_search(stem.string(), square))
+        if(std::regex_search(stem.string(), std::regex("(square)")))
             en.second = { 1.f, 0.f, 0.f, 0.f };
-        else if(std::regex_search(stem.string(), circle))
+        else if(std::regex_search(stem.string(), std::regex("(circle)")))
             en.second = { 0.f, 1.f, 0.f, 0.f };
-        else if(std::regex_search(stem.string(), triangle))
+        else if(std::regex_search(stem.string(), std::regex("(triangle)")))
             en.second = { 0.f, 0.f, 1.f, 0.f };
-        else if(std::regex_search(stem.string(), star))
+        else if(std::regex_search(stem.string(), std::regex("(star)")))
             en.second = { 0.f, 0.f, 0.f, 1.f };
         else
         {
@@ -46,13 +42,10 @@ int main(int argc, char** argv)
 
     auto nt = neural_network::create()
                   .input_layer(inputLayerSize)
-                  .hidden_layer(256)
-                  .hidden_layer(128)
+                  .hidden_layer(64, neural_network::activation::ReLU)
                   .output_layer(outputLayerSize)
-                  .max_epochs(10)
+                  .max_epochs(20)
                   .learning_rate(0.01f)
-                  .learn_stochastic(true)
-                  .training_momentum(0.9f)
                   .build();
     dataset ds(entries);
     ds.balance();
