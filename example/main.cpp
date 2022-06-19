@@ -19,6 +19,7 @@ int main(int argc, char** argv)
     std::regex square("(square)");
     std::regex circle("(circle)");
     std::regex triangle("(triangle)");
+    std::regex star("(star)");
     for(auto& entry : std::filesystem::directory_iterator(path))
     {
         auto file = entry.path();
@@ -26,11 +27,13 @@ int main(int argc, char** argv)
         en.first  = to_vector(file.string());
         auto stem = file.stem();
         if(std::regex_search(stem.string(), square))
-            en.second = { 1.f, 0.f, 0.f };
+            en.second = { 1.f, 0.f, 0.f, 0.f };
         else if(std::regex_search(stem.string(), circle))
-            en.second = { 0.f, 1.f, 0.f };
+            en.second = { 0.f, 1.f, 0.f, 0.f };
         else if(std::regex_search(stem.string(), triangle))
-            en.second = { 0.f, 0.f, 1.f };
+            en.second = { 0.f, 0.f, 1.f, 0.f };
+        else if(std::regex_search(stem.string(), star))
+            en.second = { 0.f, 0.f, 0.f, 1.f };
         else
         {
             std::cerr << "File not matched\n", exit(1);
@@ -38,16 +41,16 @@ int main(int argc, char** argv)
         entries.push_back(std::move(en));
     }
     size_t inputLayerSize  = entries.front().first.size();
-    size_t outputLayerSize = 3;
+    size_t outputLayerSize = 4;
     size_t hiddenLayerSize = sqrt(inputLayerSize * outputLayerSize);
 
     auto nt = neural_network::create()
                   .input_layer(inputLayerSize)
                   .hidden_layer(256)
-                  .hidden_layer(256)
+                  .hidden_layer(128)
                   .output_layer(outputLayerSize)
-                  .max_epochs(20)
-                  .learning_rate(0.1f)
+                  .max_epochs(10)
+                  .learning_rate(0.01f)
                   .learn_stochastic(true)
                   .training_momentum(0.9f)
                   .build();

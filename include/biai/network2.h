@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <execution>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -28,7 +29,8 @@ class dataset
 
   private:
     std::vector<entry_t> entries;
-    std::vector<entry_t> testEntries;
+    std::vector<entry_t> validationSet;
+    std::vector<entry_t> testSet;
     friend class neural_network;
 };
 class neural_network
@@ -111,10 +113,13 @@ class neural_network
     std::vector<matrix_t> dWeights;
     std::vector<vector_t> biases;
     std::vector<vector_t> dBiases;
+    std::vector<vector_t> dropout;
+    vector_t cappedOutput;
     float learningRate   = 0.1f;
     float momentum       = 0.9f;
     bool learnStochastic = true;
-    size_t maxEpochs;
+    size_t maxEpochs     = 10;
+    float keepProb       = 0.9f;
 
   private:
     friend class network_builder;
@@ -125,10 +130,11 @@ class neural_network
     void initialize_deltas();
     void initialize_biases();
 
-    float train_epoch(const std::vector<dataset::entry_t>& trainingSet);
-    float predict_test(const std::vector<dataset::entry_t>& testSet);
+    std::pair<float, float> train_epoch(const std::vector<dataset::entry_t>& trainingSet);
+    std::pair<float, float> validate_output(const std::vector<dataset::entry_t>& validationSet);
 
     void forward_pass(const vector_t& trainingSet);
+    void forward_pass_with_dropout(const vector_t& trainingSet);
     void backpropagate_error(const dataset::entry_t& trainingSet);
     void update_weights();
 };
@@ -151,10 +157,19 @@ void dataset::set_entries(std::vector<entry_t>& entries)
 void dataset::balance()
 {
     const size_t dataSize     = entries.size();
-    const size_t trainingSize = 0.8 * dataSize;
-    auto iterToTest           = std::next(entries.begin(), trainingSize);
-    testEntries.insert(testEntries.end(), std::make_move_iterator(iterToTest),
-                       std::make_move_iterator(entries.end()));
+    const size_t trainingSize = 0.6 * dataSize;
+    const size_t testSize     = (dataSize - trainingSize) * 0.5;
+
+    auto iterToValidate = std::next(entries.begin(), trainingSize + testSize);
+
+    validationSet.insert(validationSet.end(), std::make_move_iterator(iterToValidate),
+                         std::make_move_iterator(entries.end()));
+    entries.erase(iterToValidate, entries.end());
+
+    auto iterToTest = std::next(entries.begin(), trainingSize);
+
+    testSet.insert(testSet.end(), std::make_move_iterator(iterToTest),
+                   std::make_move_iterator(entries.end()));
     entries.erase(iterToTest, entries.end());
 }
 neural_network::network_builder neural_network::create()
@@ -222,15 +237,23 @@ inline void neural_network::train(const dataset& ds)
 {
     for(size_t i = 0; i < maxEpochs; ++i)
     {
-        auto now   = std::chrono::high_resolution_clock::now();
-        float mse1 = train_epoch(ds.entries);
-        float MSE  = predict_test(ds.testEntries);
-        std::cout << "\n[ epoch " << i << " completed in " << (std::chrono::high_resolution_clock::now() - now).count() * 0.000000001 << "with MSE = " << MSE << " and epoch MSE = " << mse1 << '\n';
+        auto now          = std::chrono::high_resolution_clock::now();
+        auto&& [mse, acc] = train_epoch(ds.entries);
+        auto&& [MSE, ACC] = validate_output(ds.validationSet);
+        std::cout << "\n[ epoch " << i << " completed in "
+                  << (std::chrono::high_resolution_clock::now() - now).count() * 0.000000001
+                  << " with MSE = " << MSE << " and accuracy = " << ACC
+                  << " epoch MSE = " << mse << " and accuracy = " << acc << " ]\n";
     }
+    auto&& [MSE, acc] = validate_output(ds.testSet);
+    std::cout << "\nTest set with MSE = " << MSE << " and accuracy = " << acc << '\n';
 }
-inline float neural_network::train_epoch(const std::vector<dataset::entry_t>& trainingSet)
+inline std::pair<float, float>
+neural_network::train_epoch(const std::vector<dataset::entry_t>& trainingSet)
 {
     float mse      = 0.f;
+    size_t errors  = 0;
+    float accuracy = 0.f;
     size_t passCnt = 1;
     for(const auto& entry : trainingSet)
     {
@@ -242,24 +265,69 @@ inline float neural_network::train_epoch(const std::vector<dataset::entry_t>& tr
             mse += (outputs.back()[i] - entry.second[i]) * (outputs.back()[i] - entry.second[i]);
         }
         std::cout << "\r[ pass " << passCnt++ << " of " << trainingSet.size() << " completed ]" << std::flush;
+        if(cappedOutput != entry.second) ++errors;
     }
     if(!learnStochastic) update_weights();
-    mse /= trainingSet.size();
-    return mse;
+    mse /= (trainingSet.size() * nbNeurons.back());
+    accuracy = 100.f - (errors / float(trainingSet.size())) * 100.f;
+    return { mse, accuracy };
 }
-inline float neural_network::predict_test(const std::vector<dataset::entry_t>& testSet)
+inline std::pair<float, float>
+neural_network::validate_output(const std::vector<dataset::entry_t>& validationSet)
 {
-    float mse = 0.f;
-    for(const auto& entry : testSet)
+    float mse      = 0.f;
+    size_t errors  = 0;
+    float accuracy = 0.f;
+    for(const auto& entry : validationSet)
     {
         forward_pass(entry.first);
         for(size_t i = 0; i < outputs.back().size(); ++i)
         {
             mse += (outputs.back()[i] - entry.second[i]) * (outputs.back()[i] - entry.second[i]);
         }
+
+        if(cappedOutput != entry.second) ++errors;
     }
-    mse /= testSet.size();
-    return mse;
+    mse /= (validationSet.size() * nbNeurons.back());
+    accuracy = 100.f - (errors / float(validationSet.size())) * 100.f;
+    return { mse, accuracy };
+}
+inline void neural_network::forward_pass_with_dropout(const vector_t& trainingSet)
+{
+    std::random_device dev;
+    std::mt19937 rand(dev());
+    std::uniform_real_distribution<float> dist(0.f, 1.f);
+
+    for(size_t i = 0; i < nbNeurons[1]; ++i)
+    {
+        float val = biases[0][i];
+        for(size_t j = 0; j < nbNeurons[0]; ++j)
+        {
+            val += trainingSet[j] * weights[0](i, j);
+        }
+        dropout[0][i] = (dist(rand) > keepProb) * 1.f;
+        outputs[0][i] = dropout[0][i] * (1.f / (1.f + std::exp(-val)));
+        outputs[0][i] /= keepProb;
+    }
+
+    for(size_t i = 1; i < nbLayers - 1; ++i)
+    {
+        for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
+        {
+            float val = biases[i][j];
+            for(size_t k = 0; k < nbNeurons[i]; ++k)
+            {
+                val += outputs[i - 1][k] * weights[i](j, k);
+            }
+            dropout[i][j] = (dist(rand) > keepProb) * 1.f;
+            outputs[i][j] = dropout[i][j] * (1.f / (1.f + std::exp(-val)));
+            outputs[i][j] /= keepProb;
+        }
+    }
+    auto iter  = std::max_element(outputs.back().begin(), outputs.back().end());
+    auto index = std::distance(outputs.back().begin(), iter);
+    std::fill(cappedOutput.begin(), cappedOutput.end(), 0.f);
+    cappedOutput[index] = 1.f;
 }
 inline void neural_network::forward_pass(const vector_t& trainingSet)
 {
@@ -272,6 +340,7 @@ inline void neural_network::forward_pass(const vector_t& trainingSet)
         }
         outputs[0][i] = 1.f / (1.f + std::exp(-val));
     }
+
     for(size_t i = 1; i < nbLayers - 1; ++i)
     {
         for(size_t j = 0; j < nbNeurons[i + 1]; ++j)
@@ -284,14 +353,18 @@ inline void neural_network::forward_pass(const vector_t& trainingSet)
             outputs[i][j] = 1.f / (1.f + std::exp(-val));
         }
     }
+    auto iter  = std::max_element(outputs.back().begin(), outputs.back().end());
+    auto index = std::distance(outputs.back().begin(), iter);
+    std::fill(cappedOutput.begin(), cappedOutput.end(), 0.f);
+    cappedOutput[index] = 1.f;
 }
 inline void neural_network::backpropagate_error(const dataset::entry_t& trainingSet)
 {
     for(size_t i = 0; i < nbNeurons.back(); ++i)
     {
-        deltas.back()[i] = (1.f / nbNeurons.back())
-                           * (trainingSet.second[i] - outputs.back()[i])
-                           * outputs.back()[i] * (1.f - outputs.back()[i]);
+        deltas.back()[i] = /*(1.f / nbNeurons.back()) */
+            (trainingSet.second[i] - outputs.back()[i])
+            * outputs.back()[i] * (1.f - outputs.back()[i]);
     }
     for(int i = nbLayers - 3; i >= 0; --i)
     {
@@ -312,7 +385,8 @@ inline void neural_network::backpropagate_error(const dataset::entry_t& training
             dBiases[0][i] = learningRate * deltas[0][i] + momentum * dBiases[0][i];
             for(size_t j = 0; j < nbNeurons[0]; ++j)
             {
-                dWeights[0](i, j) = learningRate * deltas[0][i] * trainingSet.first[j] + momentum * dWeights[0](i, j);
+                dWeights[0](i, j) = learningRate * deltas[0][i] * trainingSet.first[j]
+                                    + momentum * dWeights[0](i, j);
             }
         }
         for(size_t i = 1; i < nbLayers - 1; ++i)
@@ -322,7 +396,8 @@ inline void neural_network::backpropagate_error(const dataset::entry_t& training
                 dBiases[i][j] = learningRate * deltas[i][j] + momentum * dBiases[i][j];
                 for(size_t k = 0; k < nbNeurons[i]; ++k)
                 {
-                    dWeights[i](j, k) = learningRate * deltas[i][j] * outputs[i - 1][k] + momentum * dWeights[i](j, k);
+                    dWeights[i](j, k) = learningRate * deltas[i][j] * outputs[i - 1][k]
+                                        + momentum * dWeights[i](j, k);
                 }
             }
         }
@@ -399,10 +474,13 @@ inline void neural_network::initialize_outputs()
 {
     std::cout << "Initializing outputs: ";
     outputs.reserve(nbLayers - 1);
+    dropout.reserve(nbLayers - 1);
     for(size_t i = 1; i < nbLayers; ++i)
     {
         outputs.emplace_back(nbNeurons[i]);
+        dropout.emplace_back(nbNeurons[i]);
     }
+    cappedOutput.resize(nbNeurons.back());
     std::cout << "done\n";
 }
 inline void neural_network::initialize_weights()
