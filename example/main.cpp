@@ -1,16 +1,15 @@
-#include <biai/network2.h>
+#include <biai/network.h>
 #include <png.h>
 
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <map>
 #include <regex>
 #include <string>
 #include <vector>
 
 using namespace biai;
-neural_network::vector_t to_vector(const std::string& path);
+std::vector<float> to_vector(const std::string& path);
 int main(int argc, char** argv)
 {
     std::vector<dataset::entry_t> entries;
@@ -69,7 +68,7 @@ int main(int argc, char** argv)
 
     return 0;
 }
-neural_network::vector_t to_vector(const std::string& path)
+std::vector<float> to_vector(const std::string& path)
 {
     FILE* file;
     file      = fopen(path.c_str(), "rb");
@@ -95,7 +94,7 @@ neural_network::vector_t to_vector(const std::string& path)
     fclose(file);
     png_destroy_read_struct(&png, &info, NULL);
 
-    neural_network::vector_t out(height * width);
+    std::vector<float> out(height * width);
     for(size_t y = 0; y < height; ++y)
     {
         auto row = rowPointers[y];
